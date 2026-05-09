@@ -56,8 +56,8 @@ PLAN GENERADO POR JCS v2.0
 └── progress-template.json ← Estructura de memoria compartida
 
 AGENT CARDS (PROTOCOL LEVEL 3):
-- Para sistemas multi-agente complejos, generar un `agent.json` por cada sub-agente.
-- Estructura: `{ "name": "...", "role": "...", "inputs": [...], "outputs": [...], "endpoint": "..." }`.
+- Para sistemas multi-agente complejos, generar un 'agent.json' por cada sub-agente.
+- Estructura: '{ "name": "...", "role": "...", "inputs": [...], "outputs": [...], "endpoint": "..." }'.
 - Esto permite descubrimiento dinámico y desacoplamiento del orquestador.
 
 REGLAS TÉCNICAS PARA validate.sh (INVIOLABLES):
