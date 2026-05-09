@@ -1,0 +1,688 @@
+# JARVIS EL CREADOR DE SKILLS (JCS)
+## Prompt de Construcción para Abel — v1.1
+
+---
+
+## CONTEXTO Y PROPÓSITO
+
+Este documento es el plano arquitectónico completo para construir **Jarvis el Creador de Skills (JCS)**: un sistema independiente, conversacional y evolutivo cuyo único producto es generar skills para agentes de IA.
+
+JCS **no ejecuta proyectos**. JCS **diseña las instrucciones** que otros proyectos necesitan para ejecutarse.
+
+El output de JCS son **siempre DOS archivos por skill**:
+- `skill-[nombre].md` — instrucciones del agente, portátiles y genéricas
+- `validate-[nombre].sh` — script de validación mecánica específico para esa skill, listo para que el proyecto destino verifique su propia integridad antes de ejecutarse
+
+---
+
+## PRINCIPIOS DE DISEÑO (No negociables)
+
+Estos principios gobiernan cada decisión técnica. Si algo entra en conflicto con ellos, los principios ganan:
+
+1. **El arnés decide, el modelo ejecuta.** Ninguna restricción de seguridad vive en un prompt. Vive en código.
+2. **Torta sin crema.** La skill es genérica y estructuralmente correcta. El aprendizaje de dominio ocurre en el proyecto destino, no aquí.
+3. **80% afilar, 20% cortar.** Jarvis no genera nada hasta validar la arquitectura con el usuario.
+4. **Aprende de errores estructurales, no de etiquetas de dominio.** El sistema mejora cuando falla arquitectónicamente. No registra preferencias semánticas de ningún sector.
+5. **Proyecto independiente y centralizado.** JCS no se "pega" en otros proyectos. Es la fábrica. Los demás son los clientes de la fábrica.
+
+---
+
+## CORRECCIONES v1.1 (qué cambió y por qué)
+
+| Corrección | Problema que resuelve |
+|---|---|
+| **Revelación progresiva de lecciones** | `lessons-learned.md` cargado completo genera *context crowding*: el modelo optimiza para "no repetir errores viejos" en lugar de "entender el problema nuevo". Ahora Jarvis carga solo las lecciones etiquetadas con el tipo de skill actual. |
+| **Revisor adversarial (Capa 2)** | Validar encabezados es cosmética. Ahora existe un segundo agente cuya única misión es encontrar huecos lógicos en la skill generada antes de entregarla. Máximo 2 rondas. |
+| **validate.sh específico por skill** | JCS entregaba solo el `.md`. Eso es una guía inferencial. Ahora genera también el script de validación mecánica para que el proyecto destino imponga restricciones en código, no en texto. |
+
+---
+
+## STACK TÉCNICO
+
+| Capa | Tecnología | Razón |
+|---|---|---|
+| Framework | Next.js 14 (App Router) | Ya conocido, SSR, API routes nativas |
+| Base de datos | SQLite via **Turso** | Liviana, sin servidor, perfecta para este volumen |
+| ORM | Drizzle ORM | Simple, tipo-seguro, compatible con Turso |
+| IA principal | Claude API (`claude-sonnet-4-20250514`) | Motor de razonamiento de Jarvis |
+| IA revisora | Claude API (`claude-sonnet-4-20250514`) | Segundo agente adversarial independiente |
+| Audio | OpenAI Whisper API | Transcripción de audios enviados por César |
+| Estilos | Tailwind CSS | Rápido, sin configuración extra |
+| Deploy | VPS Hostinger + PM2 | Infraestructura ya existente |
+| Control de versiones | Git + GitHub | Repositorio: `objetivo/jarvis-skill-creator` |
+
+---
+
+## ESTRUCTURA DEL REPOSITORIO
+
+```
+jarvis-skill-creator/
+├── app/
+│   ├── page.tsx                       # Interfaz principal del chat
+│   └── api/
+│       ├── chat/route.ts              # Endpoint principal — recibe mensajes, llama a Claude
+│       ├── audio/route.ts             # Recibe audio, transcribe con Whisper, devuelve texto
+│       ├── skills/route.ts            # Lista y descarga de skills generadas (ambos archivos)
+│       ├── validate/route.ts          # Capa 1: sensor determinístico
+│       └── review/route.ts            # Capa 2: revisor adversarial
+├── lib/
+│   ├── jarvis-core.ts                 # Lógica del arnés: fases, restricciones, estado
+│   ├── db/
+│   │   ├── schema.ts                  # Tablas: sessions, messages, skills, lessons_learned
+│   │   └── client.ts                  # Conexión a Turso
+│   ├── validators/
+│   │   ├── skill-validator.ts         # Capa 1: validación determinística (formato, secciones)
+│   │   └── adversarial-reviewer.ts    # Capa 2: revisión inferencial (lógica, coherencia)
+│   ├── lessons/
+│   │   └── lesson-loader.ts           # Revelación progresiva: carga lecciones por tag
+│   └── prompts/
+│       ├── jarvis-system.ts           # System prompt de Jarvis (se inyecta {{LESSONS_RELEVANT}})
+│       └── reviewer-system.ts         # System prompt del revisor adversarial
+├── AGENTS.md                          # Reglas arquitectónicas de JCS (evoluciona con el uso)
+├── lessons-learned.md                 # Índice indexado por tag — nunca se carga completo
+├── .env.local                         # Variables de entorno (nunca en el repo)
+└── validate.sh                        # Template base — JCS genera uno específico por skill
+```
+
+---
+
+## BASE DE DATOS — ESQUEMA
+
+```typescript
+// lib/db/schema.ts
+
+// Sesiones de trabajo
+sessions: {
+  id: text (uuid),
+  created_at: integer (timestamp),
+  status: text ('interviewing' | 'designing' | 'generating' | 'validating' | 'complete'),
+  project_name: text,
+  skill_purpose: text,
+  skill_type: text,          // tag para revelación progresiva: 'extractor' | 'integrador' | etc.
+  architecture_plan: text,   // JSON con el plan validado por César antes de generar
+}
+
+// Mensajes de la conversación
+messages: {
+  id: text (uuid),
+  session_id: text (foreign key),
+  role: text ('user' | 'assistant' | 'reviewer'),  // 'reviewer' = agente adversarial
+  content: text,
+  created_at: integer,
+  is_audio: boolean,
+}
+
+// Skills generadas
+skills: {
+  id: text (uuid),
+  session_id: text,
+  skill_filename: text,         // ej: "skill-extractor-contratos.md"
+  validate_filename: text,      // ej: "validate-extractor-contratos.sh"
+  skill_content: text,          // Contenido del .md
+  validate_content: text,       // Contenido del .sh generado específicamente para esta skill
+  layer1_passed: boolean,       // Pasó sensor determinístico
+  layer2_passed: boolean,       // Pasó revisor adversarial
+  validated: boolean,           // true solo cuando layer1 Y layer2 = true
+  review_rounds: integer,       // Contador — máximo 2
+  created_at: integer,
+}
+
+// Lecciones aprendidas (indexadas por tipo de skill)
+lessons_learned: {
+  id: text (uuid),
+  tag: text,                   // 'extractor' | 'integrador' | 'orquestador' | 'validador' | 'notificador' | 'otro'
+  error_type: text,            // ej: "missing_exit_conditions"
+  description: text,
+  fix_applied: text,
+  created_at: integer,
+}
+```
+
+---
+
+## SYSTEM PROMPT DE JARVIS
+
+Va en `lib/prompts/jarvis-system.ts`. Se construye dinámicamente: carga solo las lecciones del tag correspondiente al tipo de skill de la sesión actual.
+
+```
+Eres Jarvis, un arquitecto de sistemas de IA especializado en crear skills para agentes.
+Tu único producto son DOS archivos: skill.md + validate.sh específico para esa skill.
+
+IDENTIDAD:
+- No eres complaciente. Eres proactivo y directo.
+- Puedes y debes desafiar decisiones del usuario si son arquitectónicamente incorrectas.
+- Defiendes tu criterio con argumentos técnicos. Asimilas sugerencias cuando tienen fundamento.
+- Nunca generes antes de tener aprobación explícita del plan.
+
+PROTOCOLO OBLIGATORIO — 4 FASES EN ORDEN ESTRICTO:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 1: DESCUBRIMIENTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Antes de proponer nada, debes entender:
+- ¿Qué hace el agente que recibirá esta skill?
+- ¿Con qué herramientas o APIs interactuará?
+- ¿Qué está PROHIBIDO que haga?
+- ¿Cuándo debe detenerse?
+- ¿Dónde vivirá este agente?
+- ¿Qué tipo de skill es? (extractor / integrador / orquestador / validador / notificador / otro)
+
+Haz MÁXIMO 2 preguntas por turno. Espera respuesta antes de continuar.
+No saltes a FASE 2 hasta tener respuesta a los 6 puntos anteriores.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 2: DISEÑO DEL PLAN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Presenta un Plan de Arquitectura estructurado:
+- Nombre de la skill
+- Tipo (tag para lecciones)
+- Herramientas que tendrá (y cuáles NO tendrá)
+- Restricciones mecánicas
+- Condiciones de salida
+- Formato de estado (JSON u otro)
+- Número de skills necesarias con justificación
+
+Espera APROBACIÓN EXPLÍCITA antes de pasar a FASE 3.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 3: GENERACIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera los DOS archivos usando los formatos estándar definidos más abajo.
+Primero skill.md, luego validate.sh específico para esa skill.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 4: VALIDACIÓN (no la ejecutas tú — la ejecuta el sistema)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Informa al usuario que los archivos pasarán por:
+- Capa 1: sensor determinístico (formato y estructura)
+- Capa 2: revisor adversarial (coherencia lógica)
+Solo si ambas capas aprueban, el usuario puede descargar.
+
+REGLAS INMUTABLES:
+1. NUNCA generes código en FASE 1 o FASE 2.
+2. NUNCA incluyas credenciales, API keys o datos de dominio específico.
+3. NUNCA registres aprendizajes de vocabulario sectorial.
+4. La skill SIEMPRE debe incluir: herramientas_permitidas, herramientas_prohibidas,
+   condiciones_de_salida, instruccion_aprendizaje_externo.
+5. Si el usuario pide saltarse fases, explica por qué no puedes y mantén el protocolo.
+
+LECCIONES APRENDIDAS RELEVANTES (cargadas por tag — no es el archivo completo):
+{{LESSONS_RELEVANT}}
+```
+
+---
+
+## SYSTEM PROMPT DEL REVISOR ADVERSARIAL
+
+Va en `lib/prompts/reviewer-system.ts`. Es un agente independiente — no comparte contexto con Jarvis.
+
+```
+Eres un revisor técnico adversarial. Tu única misión es encontrar problemas en skills 
+generadas por otro agente antes de que lleguen a producción.
+
+NO eres constructivo por defecto. Eres escéptico por diseño.
+
+EVALÚA ESTOS PUNTOS EN ORDEN:
+
+1. COHERENCIA LÓGICA
+   ¿Las herramientas permitidas son suficientes para cumplir el propósito declarado?
+   ¿Hay herramientas permitidas que en realidad no se necesitan (superficie de ataque innecesaria)?
+
+2. RESTRICCIONES
+   ¿Las condiciones de salida son específicas o ambiguas?
+   ¿Las herramientas prohibidas cubren los riesgos reales de este tipo de agente?
+
+3. PORTABILIDAD
+   ¿La skill contiene algún dato de dominio específico que debería estar en el proyecto destino?
+   ¿El estado viaja de forma que funcione en un entorno distribuido?
+
+4. SOBREDIMENSIONAMIENTO
+   ¿Se proponen más skills de las necesarias para el scope descrito?
+
+RESPONDE SIEMPRE en este formato JSON:
+{
+  "approved": boolean,
+  "issues": ["lista de problemas encontrados"],
+  "recommendation": "aprobar" | "corregir" | "rediseñar"
+}
+
+Si no encuentras problemas reales, aprueba. No inventes problemas.
+Máximo 2 rondas de revisión por skill. Si en la segunda ronda sigue fallando, recomienda "rediseñar".
+```
+
+---
+
+## FORMATO ESTÁNDAR — SKILL.MD
+
+```markdown
+# SKILL: [NOMBRE_EN_MAYUSCULAS]
+
+## Metadatos
+- **Versión**: 1.0
+- **Creado por**: Jarvis el Creador de Skills (JCS) v1.1
+- **Fecha**: [FECHA]
+- **Tipo**: [extractor | integrador | orquestador | validador | notificador | otro]
+- **Proyecto destino**: [NOMBRE_PROYECTO]
+
+## Propósito
+[2-3 oraciones. Genérico. Sin datos de dominio. Qué hace, no para quién.]
+
+## Herramientas Permitidas
+[Lista explícita de herramientas/APIs/funciones que el agente PUEDE usar]
+
+## Herramientas Prohibidas
+[Lista explícita de lo que NO puede hacer. Sección obligatoria — si está vacía, el arnés falla.]
+
+## Protocolo de Operación
+[Pasos ordenados. Máximo 7 pasos. Sin lógica de negocio específica.]
+
+## Restricciones Mecánicas
+[Reglas que el proyecto destino debe implementar como código, no como instrucciones de texto.]
+
+## Condiciones de Salida
+[Cuándo el agente debe detenerse. Específico y verificable. Obligatorio.]
+
+## Estado y Contexto
+[Cómo viaja el estado entre turnos. Formato JSON. Debe funcionar sin archivos locales compartidos.]
+
+## Instrucción de Aprendizaje Externo
+El aprendizaje de dominio específico (vocabulario, reglas de negocio, preferencias del
+cliente final) ocurre en el proyecto destino mediante su propio AGENTS.md o CLAUDE.md.
+Esta skill no incluye ni debe incluir ese contexto.
+
+## Tarjeta de Descubrimiento
+```json
+{
+  "name": "[nombre-skill]",
+  "version": "1.0",
+  "type": "[tipo]",
+  "capability": "[descripción de una línea]",
+  "requires": ["[dependencia-1]", "[dependencia-2]"],
+  "output": "[tipo de output]",
+  "tags": ["[etiqueta-1]", "[etiqueta-2]"]
+}
+```
+```
+
+---
+
+## FORMATO ESTÁNDAR — VALIDATE.SH (generado por skill)
+
+Jarvis genera un `validate.sh` específico para cada skill. No es genérico — incluye las validaciones propias de lo que esa skill debe y no debe hacer.
+
+```bash
+#!/bin/bash
+# Sensor mecánico generado por JCS para: [NOMBRE_SKILL]
+# Ejecutar en el proyecto destino antes de activar el agente
+
+SKILL_FILE=$1
+ERRORS=0
+WARNINGS=0
+
+echo "=== VALIDANDO SKILL: [NOMBRE_SKILL] ==="
+echo ""
+
+# --- SECCIONES OBLIGATORIAS ---
+check_section() {
+  if ! grep -q "## $1" "$SKILL_FILE"; then
+    echo "❌ ERROR: Sección obligatoria ausente: ## $1"
+    ERRORS=$((ERRORS + 1))
+  else
+    echo "✅ ## $1"
+  fi
+}
+
+check_section "Propósito"
+check_section "Herramientas Permitidas"
+check_section "Herramientas Prohibidas"
+check_section "Condiciones de Salida"
+check_section "Instrucción de Aprendizaje Externo"
+check_section "Tarjeta de Descubrimiento"
+
+# --- CREDENCIALES HARDCODEADAS ---
+if grep -qiE "(api_key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}" "$SKILL_FILE"; then
+  echo "❌ ERROR CRÍTICO: Posibles credenciales en el archivo"
+  ERRORS=$((ERRORS + 1))
+fi
+
+# --- LONGITUD MÍNIMA ---
+WORD_COUNT=$(wc -w < "$SKILL_FILE")
+if [ "$WORD_COUNT" -lt 150 ]; then
+  echo "❌ ERROR: Skill demasiado corta ($WORD_COUNT palabras / mínimo 150)"
+  ERRORS=$((ERRORS + 1))
+fi
+
+# --- VALIDACIONES ESPECÍFICAS DE ESTA SKILL ---
+# [Jarvis genera aquí las validaciones propias del tipo y propósito de la skill]
+# Ejemplo para tipo extractor:
+# if ! grep -q "Condiciones de Salida" "$SKILL_FILE"; then ...
+# if grep -q "escribir" "$SKILL_FILE"; then echo "⚠️ WARNING: skill extractora menciona escritura"; fi
+
+echo ""
+if [ $ERRORS -eq 0 ]; then
+  echo "✅ VALIDACIÓN EXITOSA — Skill lista para activar en este proyecto"
+  exit 0
+else
+  echo "❌ VALIDACIÓN FALLIDA — $ERRORS error(es). No activar hasta corregir."
+  exit 1
+fi
+```
+
+---
+
+## PIPELINE DE VALIDACIÓN (Capa 1 + Capa 2)
+
+```typescript
+// lib/validators/adversarial-reviewer.ts
+
+export async function runAdversarialReview(skillContent: string): Promise<{
+  approved: boolean;
+  issues: string[];
+  recommendation: 'aprobar' | 'corregir' | 'rediseñar';
+}> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: REVIEWER_SYSTEM_PROMPT,  // cargado desde lib/prompts/reviewer-system.ts
+      messages: [{
+        role: 'user',
+        content: `Revisa esta skill y responde SOLO en JSON:\n\n${skillContent}`
+      }]
+    })
+  });
+
+  const data = await response.json();
+  const text = data.content.find((b: any) => b.type === 'text')?.text ?? '';
+
+  try {
+    return JSON.parse(text.replace(/```json|```/g, '').trim());
+  } catch {
+    return {
+      approved: false,
+      issues: ['Error parseando respuesta del revisor'],
+      recommendation: 'corregir'
+    };
+  }
+}
+```
+
+```typescript
+// lib/validators/skill-validator.ts — Capa 1 (determinística)
+
+const REQUIRED_SECTIONS = [
+  'Propósito',
+  'Herramientas Permitidas',
+  'Herramientas Prohibidas',
+  'Condiciones de Salida',
+  'Instrucción de Aprendizaje Externo',
+  'Tarjeta de Descubrimiento'
+];
+
+const FORBIDDEN_PATTERNS = [
+  /api_key\s*[:=]\s*['"][^'"]{8,}/i,
+  /secret\s*[:=]\s*['"][^'"]{8,}/i,
+  /password\s*[:=]\s*['"][^'"]{8,}/i,
+];
+
+export function validateSkill(content: string): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  for (const section of REQUIRED_SECTIONS) {
+    if (!content.includes(`## ${section}`)) {
+      errors.push(`Sección obligatoria ausente: ## ${section}`);
+    }
+  }
+
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (pattern.test(content)) {
+      errors.push('Posibles credenciales detectadas. Nunca incluir API keys en la skill.');
+    }
+  }
+
+  const wordCount = content.split(/\s+/).length;
+  if (wordCount < 150) {
+    errors.push(`Skill demasiado corta (${wordCount} palabras / mínimo 150).`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+```
+
+---
+
+## REVELACIÓN PROGRESIVA — LECCIONES APRENDIDAS
+
+```typescript
+// lib/lessons/lesson-loader.ts
+
+export async function loadRelevantLessons(skillType: string): Promise<string> {
+  // Lee lessons-learned.md y filtra solo las lecciones con el tag del tipo actual
+  // El archivo está indexado así:
+  //
+  // <!-- tag:extractor -->
+  // - Error: skill extractora sin condición de salida explícita
+  //   Fix: agregar "## Condiciones de Salida" con criterio verificable
+  // <!-- /tag:extractor -->
+  //
+  // <!-- tag:integrador -->
+  // - Error: skill integradora con credenciales en el .md
+  //   Fix: instrucciones para inyectar desde Secret Manager
+  // <!-- /tag:integrador -->
+
+  const fs = await import('fs/promises');
+  const content = await fs.readFile('lessons-learned.md', 'utf-8');
+
+  const tagRegex = new RegExp(
+    `<!-- tag:${skillType} -->([\\s\\S]*?)<!-- /tag:${skillType} -->`,
+    'g'
+  );
+
+  const matches = [...content.matchAll(tagRegex)];
+  if (matches.length === 0) return '(Sin lecciones registradas para este tipo de skill)';
+
+  return matches.map(m => m[1].trim()).join('\n');
+}
+```
+
+**Estructura del archivo `lessons-learned.md`:**
+
+```markdown
+# Lecciones Aprendidas — JCS
+*Índice por tipo de skill. Jarvis carga solo la sección relevante.*
+
+<!-- tag:extractor -->
+(vacío hasta primer error real)
+<!-- /tag:extractor -->
+
+<!-- tag:integrador -->
+(vacío hasta primer error real)
+<!-- /tag:integrador -->
+
+<!-- tag:orquestador -->
+(vacío hasta primer error real)
+<!-- /tag:orquestador -->
+
+<!-- tag:validador -->
+(vacío hasta primer error real)
+<!-- /tag:validador -->
+
+<!-- tag:notificador -->
+(vacío hasta primer error real)
+<!-- /tag:notificador -->
+
+<!-- tag:otro -->
+(vacío hasta primer error real)
+<!-- /tag:otro -->
+```
+
+---
+
+## AGENTS.MD DE JCS
+
+```markdown
+# AGENTS.md — Jarvis el Creador de Skills v1.1
+
+## Misión
+Producir skills estructuralmente correctas, portátiles y seguras.
+No ejecutar proyectos. No aprender vocabulario de dominio.
+Entregar siempre DOS archivos: skill.md + validate.sh específico para esa skill.
+
+## Restricciones del Sistema
+- Jarvis no genera nada hasta recibir aprobación explícita del plan (FASE 2).
+- Jarvis nunca incluye datos de dominio específico en las skills generadas.
+- Pipeline de validación obligatorio: Capa 1 (determinístico) → Capa 2 (adversarial).
+- Máximo 2 rondas de corrección total. Si falla dos veces → reiniciar FASE 2.
+- El aprendizaje de Jarvis es exclusivamente arquitectónico (errores de formato, 
+  secciones faltantes, patrones de fallo estructural).
+
+## Carga de Lecciones (Revelación Progresiva)
+lessons-learned.md es un índice con etiquetas, no un manual monolítico.
+Jarvis carga SOLO las lecciones con el tag del tipo de skill actual.
+Tags válidos: extractor | integrador | orquestador | validador | notificador | otro
+NUNCA cargar el archivo completo — previene context crowding.
+
+## Reglas de Calidad de Output
+- Capa 1 (determinística) valida formato y secciones.
+- Capa 2 (adversarial) valida coherencia lógica.
+- validated = true solo cuando AMBAS capas aprueban.
+- El usuario descarga los dos archivos solo cuando validated = true.
+
+## Errores Arquitectónicos Registrados
+(Actualizar en lessons-learned.md con el tag correspondiente cuando ocurran)
+```
+
+---
+
+## INTERFAZ DE USUARIO
+
+Chatbot minimalista. El foco es la conversación, no el dashboard.
+
+**Elementos:**
+- Área de chat con historial de la sesión
+- Input de texto
+- Botón de micrófono → graba → Whisper transcribe → aparece como texto en el chat
+- Indicador de fase visible siempre: `[DESCUBRIMIENTO] → [DISEÑO] → [GENERACIÓN] → [VALIDACIÓN]`
+- Panel lateral: lista de skills generadas con estado (pendiente / validada / fallida)
+- Al pasar validación: botón de descarga doble (`skill.md` + `validate.sh`)
+- Si falla: reporte de errores visible antes de reintentar
+
+---
+
+## FLUJO COMPLETO — EJEMPLO
+
+```
+César: "Quiero una skill para un agente que procese contratos PDF"
+
+Jarvis [FASE 1]:
+"Antes de diseñar nada, necesito dos respuestas:
+1. ¿El agente solo leerá los PDFs o también escribirá o modificará archivos?
+2. ¿Qué produce como output: resumen, JSON con campos, alertas?"
+
+César: "Solo lee. Output: JSON con campos clave."
+
+Jarvis:
+"Dos puntos más:
+1. ¿Cuándo debe detenerse: al procesar un PDF, un lote, o por evento externo?
+2. ¿Dónde vivirá: servidor propio, Cloud Run, otro?"
+
+César: "Se detiene al extraer todos los campos de un PDF. Vive en el VPS."
+
+Jarvis [FASE 2]:
+"Plan de Arquitectura — tipo: extractor
+
+- Nombre: skill-extractor-pdf
+- Herramientas permitidas: leer PDF, parsear texto, generar JSON
+- Herramientas prohibidas: escribir archivos, modificar PDFs, acceso a red externo
+- Condiciones de salida: campos extraídos completos en un PDF → detener
+- Estado: JSON con campos, viaja por HTTP entre llamadas
+- Skills necesarias: 1 (scope acotado y claro)
+
+¿Aprobado?"
+
+César: "Aprobado."
+
+Jarvis [FASE 3]:
+[Genera skill-extractor-pdf.md + validate-extractor-pdf.sh]
+
+Sistema [FASE 4 - Capa 1]:
+✅ Formato correcto — 6/6 secciones presentes
+
+Sistema [FASE 4 - Capa 2 — Revisor adversarial]:
+{ "approved": true, "issues": [], "recommendation": "aprobar" }
+
+Jarvis:
+"✅ Ambas capas aprobaron. Tus archivos están listos."
+[Descargar skill-extractor-pdf.md] [Descargar validate-extractor-pdf.sh]
+```
+
+---
+
+## INSTRUCCIONES PARA ABEL — PASOS DE IMPLEMENTACIÓN
+
+### Paso 1: Repositorio
+```bash
+mkdir jarvis-skill-creator && cd jarvis-skill-creator
+git init
+npx create-next-app@latest . --typescript --tailwind --app --no-src-dir
+```
+
+### Paso 2: Dependencias
+```bash
+npm install @libsql/client drizzle-orm @anthropic-ai/sdk openai
+npm install drizzle-kit --save-dev
+```
+
+### Paso 3: Variables de entorno (.env.local)
+```env
+ANTHROPIC_API_KEY=         # Jarvis + Revisor adversarial
+OPENAI_API_KEY=            # Solo para Whisper (transcripción de audio)
+TURSO_DATABASE_URL=
+TURSO_AUTH_TOKEN=
+```
+
+### Paso 4: Orden de implementación
+1. `lib/db/schema.ts` — esquema con campo `skill_type` y las dos capas de validación
+2. `lib/lessons/lesson-loader.ts` — revelación progresiva por tag
+3. `lib/prompts/jarvis-system.ts` — system prompt con `{{LESSONS_RELEVANT}}`
+4. `lib/prompts/reviewer-system.ts` — system prompt del revisor adversarial
+5. `lib/validators/skill-validator.ts` — Capa 1 determinística
+6. `lib/validators/adversarial-reviewer.ts` — Capa 2 inferencial
+7. `lib/jarvis-core.ts` — lógica de fases y estado de sesión
+8. `app/api/chat/route.ts` — endpoint principal
+9. `app/api/audio/route.ts` — Whisper
+10. `app/api/validate/route.ts` — Capa 1
+11. `app/api/review/route.ts` — Capa 2
+12. `app/api/skills/route.ts` — descarga de ambos archivos
+13. `app/page.tsx` — UI del chat
+14. `lessons-learned.md` — crear con estructura de tags vacíos
+15. `AGENTS.md` — crear con el contenido definido arriba
+16. `validate.sh` — template base en la raíz
+
+### Paso 5: Deploy en VPS
+```bash
+npm run build
+pm2 start npm --name "jarvis-jcs" -- start
+pm2 save
+```
+
+---
+
+## LO QUE JCS NO HACE
+
+| ❌ No hace | ✅ Lo hace el proyecto destino |
+|---|---|
+| Aprender vocabulario de un sector | Configurar su propio AGENTS.md |
+| Conectarse a APIs de clientes | Inyectar sus propias credenciales |
+| Ejecutar el agente generado | Ejecutar la skill en su entorno |
+| Recordar nombres de clientes finales | Manejar datos de sus usuarios |
+| Optimizar para un caso puntual | Adaptar la skill a su contexto local |
+| Cargar todas las lecciones pasadas | Filtrar las relevantes por tipo de skill |
+
+---
+
+*OBJETIVO / César Reyes — JCS v1.1*
+*Harness Engineering 2026*
+*El aprendizaje de dominio ocurre en el proyecto destino.*

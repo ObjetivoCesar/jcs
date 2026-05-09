@@ -1,0 +1,6 @@
+{
+  "name": "Jarvis JCS - El Creador de Skills",
+  "description": "Sistema conversacional y evolutivo para diseñar, validar y generar archivos skill.md y validate.sh para agentes de IA.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["AI Skill Generation", "Automated Validation", "Audio Transcription"]
+}

@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg: #E6E6E6;
+  --card-bg: #151619;
+  --text-primary: #FFFFFF;
+  --text-secondary: #8E9299;
+  --accent: #FFA500; /* Jarvis Orange */
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+  color: #1a1a1a;
+}
+
+.hardware-card {
+  background-color: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  color: var(--text-primary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.status-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.jarvis-button {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.jarvis-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat-bubble-user {
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid var(--accent);
+}
+
+.chat-bubble-assistant {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--text-secondary);
+}
+

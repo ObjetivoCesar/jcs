@@ -1,0 +1,73 @@
+📋 Plan de Refactorización de JCS v2.0
+🎯 Objetivo
+Convertir JCS de "generador de skill.md" a "fábrica de ecosistemas de arnés para sistemas multiagente".
+
+🗑️ Lo que se ELIMINA
+Archivo	Razón
+proyecto_prueba/skill-madre.md	Pertenecía a saas-supercias, no a JCS
+.agent/ en saas-supercias	Error mío, ya corregido
+Detector # SKILL: case-sensitive	Reemplazado por detector flexible (ya hecho)
+🔄 Lo que CAMBIA
+#	Archivo	Cambio
+1	jarvis-system.ts	Reescribir system prompt completo
+2	jarvis-core.ts	Nuevo generateHarnessPlan() en vez de generateSkillWithFlash()
+3	server.ts	Nuevo detector de "plan de arnés", nuevo pipeline de generación
+4	skill-validator.ts	Validar los 4 pilares, no solo secciones markdown
+5	AGENTS.md	Actualizar con nueva misión v2.0
+6	App.tsx	Mostrar plan de arnés en UI (estructura, no solo texto)
+📐 System Prompt Nuevo — jarvis-system.ts
+Misión: Eres Jarvis, arquitecto de arneses para sistemas multiagente.
+
+Fase 1 — Entrevista profunda. Sin prisa. Hasta tener claro:
+
+Dominio del problema (abogado, contador, DevOps...)
+Qué herramientas necesita el agente
+Qué acciones están PROHIBIDAS mecánicamente
+Condiciones de salida por rol
+Si es multiagente: cuántos subagentes y cómo se comunican
+Entorno de ejecución (Next.js, Cloud Run, VPS...)
+Fase 2 — Plan de Arnés. Presentas:
+
+Estructura de archivos (AGENTS.md, skill-*.md, validate.sh, progress.json)
+Herramientas por agente (y cuáles NO tiene cada uno)
+Mapa de navegación para AGENTS.md
+Restricciones mecánicas (código, no prompts)
+Si es multiagente: protocolo de contexto distribuido
+Formato del plan (obligatorio):
+
+
+PLAN DE ARNÉS: [nombre]├── 1. AGENTS.md (mapa de navegación)├── 2. Agentes (orquestador + N subagentes)├── 3. Herramientas por agente (+ prohibidas)├── 4. validate.sh (sensores mecánicos)├── 5. progress.json (memoria compartida)└── 6. Feedback loop (error → regla permanente)
+Reglas inmutables:
+
+NUNCA generes archivos hasta aprobación explícita
+NUNCA incluyas APIs concretas (solo capacidades: "endpoint que devuelva X")
+El plan es genérico. El proyecto destino lo adapta.
+Voz disponible para entrevista, no obligatoria.
+📐 Output Nuevo — Lo que JCS entrega
+Un ecosistema de 5 archivos como plano:
+
+
+PLAN GENERADO POR JCS v2.0├── AGENTS.md              ← Mapa de navegación del proyecto├── skill-orquestador.md   ← Instrucciones del agente líder├── skill-subagente-1.md   ← (si aplica) Subagente especializado├── validate.sh            ← Sensor mecánico específico└── progress-template.json ← Estructura de memoria compartida
+📐 Validación Nueva — 4 Pilares
+Capa 1 verifica que el plan incluya:
+
+Restricciones — ¿Están declaradas las herramientas PROHIBIDAS?
+Mapa de navegación — ¿El AGENTS.md dice DÓNDE buscar, no solo QUÉ hay?
+Sensores — ¿El validate.sh impone restricciones mecánicas reales?
+Feedback loop — ¿Hay mecanismo para error → regla permanente?
+⏱️ Orden de ejecución
+Paso	Archivo	Tiempo estimado
+1	Reescribir jarvis-system.ts	15 min
+2	Reescribir jarvis-core.ts (nuevo generateHarnessPlan)	15 min
+3	Actualizar server.ts (detección + pipeline)	10 min
+4	Actualizar skill-validator.ts (4 pilares)	10 min
+5	Actualizar AGENTS.md de JCS	5 min
+6	Ajustar App.tsx (mostrar plan en UI)	10 min
+7	Probar pipeline completo	10 min
+⚠️ Nota importante
+No romper lo que funciona:
+
+Chat conversacional → se mantiene
+4 fases → se mantienen (pero con nueva profundidad)
+Capa 1 + Capa 2 → se mantienen (validan los 4 pilares)
+Botón COPIAR → se mantiene
