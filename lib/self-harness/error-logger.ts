@@ -5,14 +5,14 @@
  * Pilar 4 (Feedback Loop): Errores repetitivos generan reglas automáticas.
  * 
  * Uso:
- *   import { errorLogger } from './lib/self-harness/error-logger.ts';
+ *   import { errorLogger } from './lib/self-harness/error-logger.js';
  *   const log = errorLogger(db);
  *   await log.error('api_error', 'DeepSeek API timeout', { sessionId });
  *   await log.critical('db_error', 'Base de datos caída', err);
  */
 
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../db/supabase-schema.ts';
+import * as schema from '../db/supabase-schema.js';
 import crypto from 'crypto';
 
 type DB = NodePgDatabase<typeof schema>;

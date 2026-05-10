@@ -1,5 +1,5 @@
-import { deepseekChat } from '../deepseek-client.ts';
-import { REVIEWER_SYSTEM_PROMPT } from '../prompts/reviewer-system.ts';
+import { deepseekChat } from '../deepseek-client.js';
+import { REVIEWER_SYSTEM_PROMPT } from '../prompts/reviewer-system.js';
 
 export interface ReviewResult {
   approved: boolean;

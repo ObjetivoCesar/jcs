@@ -1,6 +1,6 @@
-import { deepseekChat, type DeepSeekMessage } from "./deepseek-client.ts";
-import { JARVIS_SYSTEM_PROMPT } from "./prompts/jarvis-system.ts";
-import { loadRelevantLessons } from "./lessons/lesson-loader.ts";
+import { deepseekChat, type DeepSeekMessage } from "./deepseek-client.js";
+import { JARVIS_SYSTEM_PROMPT } from "./prompts/jarvis-system.js";
+import { loadRelevantLessons } from "./lessons/lesson-loader.js";
 
 export interface ChatSession {
   id: string;

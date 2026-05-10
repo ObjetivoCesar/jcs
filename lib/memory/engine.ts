@@ -11,8 +11,8 @@
 
 import { eq, desc, like } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../db/supabase-schema.ts';
-import { detectEntities, detectDecisions } from './detector.ts';
+import * as schema from '../db/supabase-schema.js';
+import { detectEntities, detectDecisions } from './detector.js';
 import crypto from 'crypto';
 
 type DB = NodePgDatabase<typeof schema>;

@@ -9,7 +9,7 @@
 
 import { eq, desc, count, gte, and } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../db/supabase-schema.ts';
+import * as schema from '../db/supabase-schema.js';
 import crypto from 'crypto';
 
 type DB = NodePgDatabase<typeof schema>;

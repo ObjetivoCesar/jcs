@@ -1,5 +1,5 @@
 import serverless from 'serverless-http';
-import { createJarvisApp } from '../server.ts';
+import { createJarvisApp } from '../server.js';
 
 let appInstance: any;
 

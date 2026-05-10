@@ -1,4 +1,4 @@
-import { deepseekChat } from '../lib/deepseek-client.ts';
+import { deepseekChat } from '../lib/deepseek-client.js';
 import 'dotenv/config';
 
 async function test() {
