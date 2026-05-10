@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { eq, desc } from "drizzle-orm";
@@ -754,6 +753,8 @@ fi
   // ═══════════════════════════════════════════════
   if (process.env.NODE_ENV !== "production") {
     console.log("⚡ Activando Vite middleware (modo dev)...");
+    // Vite se importa dinámicamente — no en producción/Vercel
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

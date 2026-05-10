@@ -1,20 +1,15 @@
-import serverless from 'serverless-http';
 import { createJarvisApp } from '../server.js';
 
 let appInstance: any;
+let initError: string | null = null;
 
 export default async function handler(req: any, res: any) {
   if (!appInstance) {
     try {
-      const app = await createJarvisApp();
-      appInstance = serverless(app);
+      appInstance = await createJarvisApp();
     } catch (err: any) {
-      console.error('[FATAL] Error al crear la app:', err.message, err.stack);
-      // Responder con un error mínimo directamente
-      return res.status(500).json({
-        error: 'La aplicación no pudo inicializarse',
-        message: err.message,
-      });
+      initError = err.message;
+      return res.status(500).json({ error: 'Server no pudo cargarse', details: initError });
     }
   }
   return appInstance(req, res);
