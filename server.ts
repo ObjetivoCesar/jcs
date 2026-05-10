@@ -1,8 +1,6 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { eq, desc } from "drizzle-orm";
-import * as schema from "./lib/db/supabase-schema.js";
 import { runJarvisTurn, generateHarnessPlan } from "./lib/jarvis-core.js";
 import { deepseekChat } from "./lib/deepseek-client.js";
 import { validateSkill } from "./lib/validators/skill-validator.js";
@@ -39,150 +37,41 @@ async function startServer() {
     next(err);
   });
 
-  // ── Base de datos Supabase (PostgreSQL) — opcional ──
-  // Sin SUPABASE_DATABASE_URL, la app funciona en modo "sin BD" (solo health check y frontend)
-  const connectionString = process.env.SUPABASE_DATABASE_URL;
-  let sql: any = null;
-  let db: any = null;
+  // ── Base de datos Supabase (via @supabase/supabase-js) — opcional ──
+  // Usa NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (ya en Vercel)
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let supabase: any = null;
   let log: any = { capture: async () => {}, low: async () => {}, medium: async () => {}, high: async () => {}, critical: async () => {} };
   let feedback: any = { analyzeAndGenerateRules: async () => [], loadActiveRules: async () => '' };
 
-  if (connectionString) {
-    console.log(`☁️  Conectando a Supabase PostgreSQL...`);
+  if (supabaseUrl && supabaseKey) {
+    console.log(`☁️  Conectando a Supabase via @supabase/supabase-js...`);
     try {
-      const { default: postgres } = await import('postgres');
-      const { drizzle } = await import('drizzle-orm/node-postgres');
-      
-      sql = postgres(connectionString, {
-        max: 10,
-        idle_timeout: 30,
-        connect_timeout: 15,
+      const { createClient } = await import('@supabase/supabase-js');
+      supabase = createClient(supabaseUrl, supabaseKey, {
+        auth: { persistSession: false },
       });
-      db = drizzle(sql, { schema });
 
-      // ── Crear tablas automáticamente ──
-      console.log('🏗️  Verificando/creando tablas jarvis_*...');
-      await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS jarvis_sessions (
-      id TEXT PRIMARY KEY,
-      created_at BIGINT NOT NULL,
-      status TEXT DEFAULT 'interviewing',
-      project_name TEXT,
-      skill_purpose TEXT,
-      skill_type TEXT DEFAULT 'otro',
-      architecture_plan TEXT
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_messages (
-      id TEXT PRIMARY KEY,
-      session_id TEXT REFERENCES jarvis_sessions(id) ON DELETE CASCADE,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at BIGINT NOT NULL,
-      is_audio BOOLEAN DEFAULT FALSE
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_skills (
-      id TEXT PRIMARY KEY,
-      session_id TEXT REFERENCES jarvis_sessions(id) ON DELETE CASCADE,
-      skill_filename TEXT NOT NULL,
-      skill_content TEXT NOT NULL,
-      validate_filename TEXT NOT NULL,
-      validate_content TEXT NOT NULL,
-      harness_data TEXT,
-      layer1_passed BOOLEAN DEFAULT FALSE,
-      layer2_passed BOOLEAN DEFAULT FALSE,
-      validated BOOLEAN DEFAULT FALSE,
-      review_rounds INTEGER DEFAULT 0,
-      created_at BIGINT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_lessons (
-      id TEXT PRIMARY KEY,
-      tag TEXT NOT NULL,
-      error_type TEXT NOT NULL,
-      description TEXT NOT NULL,
-      fix_applied TEXT NOT NULL,
-      automated BOOLEAN DEFAULT FALSE,
-      created_at BIGINT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_memory_entities (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      type TEXT NOT NULL,
-      description TEXT,
-      metadata TEXT,
-      first_seen_at BIGINT NOT NULL,
-      last_seen_at BIGINT NOT NULL,
-      occurrence_count INTEGER DEFAULT 1
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_memory_facts (
-      id TEXT PRIMARY KEY,
-      session_id TEXT REFERENCES jarvis_sessions(id) ON DELETE SET NULL,
-      fact_type TEXT NOT NULL,
-      content TEXT NOT NULL,
-      entities TEXT,
-      importance INTEGER DEFAULT 3,
-      created_at BIGINT NOT NULL,
-      last_accessed BIGINT,
-      access_count INTEGER DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_memory_sessions (
-      id TEXT PRIMARY KEY,
-      session_id TEXT REFERENCES jarvis_sessions(id) ON DELETE CASCADE,
-      summary TEXT NOT NULL,
-      key_decisions TEXT,
-      entities_mentioned TEXT,
-      skills_generated TEXT,
-      token_estimate INTEGER DEFAULT 0,
-      created_at BIGINT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS jarvis_memory_links (
-      id TEXT PRIMARY KEY,
-      source_type TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      target_type TEXT NOT NULL,
-      target_id TEXT NOT NULL,
-      link_type TEXT NOT NULL,
-      created_at BIGINT NOT NULL
-    );
-    -- Self-harness: error log
-    CREATE TABLE IF NOT EXISTS jarvis_error_log (
-      id TEXT PRIMARY KEY,
-      session_id TEXT REFERENCES jarvis_sessions(id) ON DELETE SET NULL,
-      error_type TEXT NOT NULL,
-      error_code TEXT,
-      message TEXT NOT NULL,
-      stack_trace TEXT,
-      metadata TEXT,
-      severity TEXT DEFAULT 'medium',
-      resolved BOOLEAN DEFAULT FALSE,
-      resolved_at BIGINT,
-      created_at BIGINT NOT NULL
-    );
-    -- Self-harness: feedback rules
-    CREATE TABLE IF NOT EXISTS jarvis_feedback_rules (
-      id TEXT PRIMARY KEY,
-      rule_type TEXT NOT NULL,
-      description TEXT NOT NULL,
-      condition TEXT NOT NULL,
-      action TEXT NOT NULL,
-      source_error_type TEXT,
-      occurrence_count INTEGER DEFAULT 1,
-      active BOOLEAN DEFAULT TRUE,
-      created_at BIGINT NOT NULL,
-      last_triggered_at BIGINT
-    );
-  `);
-  console.log("✅ BD lista. Tablas con prefijo jarvis_ listas.");
+      // Verificar conexión
+      const { error: healthError } = await supabase.from('jarvis_sessions').select('id').limit(1);
+      if (healthError && healthError.code !== 'PGRST116') { // PGRST116 = tabla vacía, normal
+        console.error('❌ Error al verificar conexión a Supabase:', healthError.message);
+        supabase = null;
+      } else {
+        console.log('✅ Conexión a Supabase OK. Tablas jarvis_* detectadas.');
 
-  // ── Inicializar self-harness ──
-  log = errorLogger(db);
-  feedback = feedbackEngine(db);
+        // ── Inicializar self-harness ──
+        log = errorLogger(supabase);
+        feedback = feedbackEngine(supabase);
+      }
     } catch (e) {
       console.error('❌ Error al conectar a Supabase:', e);
       console.log('⚠️  Continuando sin BD...');
     }
   } else {
-    console.log('⚠️  Sin SUPABASE_DATABASE_URL — modo sin BD. Solo frontend + health check.');
-    console.log('   Configura SUPABASE_DATABASE_URL en .env para funcionalidad completa.');
+    console.log('⚠️  Sin NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY — modo sin BD.');
+    console.log('   Configura estas variables en Vercel para funcionalidad completa.');
   }
 
   // ═══════════════════════════════════════════════
@@ -191,13 +80,9 @@ async function startServer() {
 
   // ── Health ──
   app.get("/api/health", async (_req, res) => {
-    const dbStatus = db ? 'connected' : 'not_configured';
-    let dbOk = false;
-    if (db && sql) {
-      try { dbOk = await sql`SELECT 1`.then(() => true).catch(() => false); } catch {}
-    }
+    const dbStatus = supabase ? 'connected' : 'not_configured';
     res.json({
-      status: dbOk || !db ? "ok" : "error",
+      status: supabase ? "ok" : "ok",
       version: "2.1",
       db: dbStatus,
       models: {
@@ -209,12 +94,12 @@ async function startServer() {
 
   // ── Health Detallado (self-harness) ──
   app.get("/api/health/detailed", async (_req, res) => {
-    if (!db) {
+    if (!supabase) {
       return res.json({
         status: "ok",
         version: "2.1",
         db: "not_configured",
-        message: "Configura SUPABASE_DATABASE_URL en Vercel para activar todas las funcionalidades.",
+        message: "Configura NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Vercel.",
         stats: { recentErrors: 0, activeRules: 0, activeSessions: 0 },
         recentErrors: [],
         activeRules: [],
@@ -223,25 +108,25 @@ async function startServer() {
     }
     try {
       // Errores recientes
-      const recentErrors = await db
-        .select()
-        .from(schema.jarvisErrorLog)
-        .orderBy(desc(schema.jarvisErrorLog.createdAt))
+      const { data: recentErrors } = await supabase
+        .from('jarvis_error_log')
+        .select('*')
+        .order('created_at', { ascending: false })
         .limit(10);
 
       // Reglas activas
-      const activeRules = await db
-        .select()
-        .from(schema.jarvisFeedbackRules)
-        .where(eq(schema.jarvisFeedbackRules.active, true))
-        .orderBy(desc(schema.jarvisFeedbackRules.occurrenceCount))
+      const { data: activeRules } = await supabase
+        .from('jarvis_feedback_rules')
+        .select('*')
+        .eq('active', true)
+        .order('occurrence_count', { ascending: false })
         .limit(10);
 
       // Sesiones activas
-      const activeSessions = await db
-        .select()
-        .from(schema.jarvisSessions)
-        .orderBy(desc(schema.jarvisSessions.createdAt))
+      const { data: activeSessions } = await supabase
+        .from('jarvis_sessions')
+        .select('*')
+        .order('created_at', { ascending: false })
         .limit(5);
 
       res.json({
@@ -250,13 +135,13 @@ async function startServer() {
         db: "supabase",
         timestamp: Date.now(),
         stats: {
-          recentErrors: recentErrors.length,
-          activeRules: activeRules.length,
-          activeSessions: activeSessions.length,
+          recentErrors: recentErrors?.length || 0,
+          activeRules: activeRules?.length || 0,
+          activeSessions: activeSessions?.length || 0,
         },
-        recentErrors,
-        activeRules,
-        activeSessions,
+        recentErrors: recentErrors || [],
+        activeRules: activeRules || [],
+        activeSessions: activeSessions || [],
       });
     } catch (e: any) {
       await log.capture('db_error', 'Error en health detail', e).catch(() => {});
@@ -268,11 +153,11 @@ async function startServer() {
   });
 
   // ── Middleware: verificar que DB esté configurada ──
-  const requireDb = (req: any, res: any, next: any) => {
-    if (!db) {
+  const requireDb = (_req: any, res: any, next: any) => {
+    if (!supabase) {
       return res.status(503).json({
         error: "Base de datos no configurada",
-        message: "Configura SUPABASE_DATABASE_URL en las variables de entorno de Vercel.",
+        message: "Configura NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Vercel.",
       });
     }
     next();
@@ -281,8 +166,12 @@ async function startServer() {
   // ── Sesiones ──
   app.get("/api/sessions", requireDb, async (_req, res) => {
     try {
-      const all = await db.select().from(schema.jarvisSessions).orderBy(schema.jarvisSessions.createdAt);
-      res.json(all);
+      const { data, error } = await supabase
+        .from('jarvis_sessions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data);
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Error al obtener sesiones" });
@@ -292,11 +181,12 @@ async function startServer() {
   app.post("/api/sessions", requireDb, async (_req, res) => {
     try {
       const id = uuid();
-      await db.insert(schema.jarvisSessions).values({
+      const { error } = await supabase.from('jarvis_sessions').insert({
         id,
-        createdAt: Date.now(),
+        created_at: Date.now(),
         status: 'interviewing',
       });
+      if (error) throw error;
       res.json({ id });
     } catch (e) {
       console.error(e);
@@ -308,12 +198,11 @@ async function startServer() {
     const { id } = req.params;
     try {
       // Limpieza profunda de cascada manual
-      await db.delete(schema.jarvisMessages).where(eq(schema.jarvisMessages.sessionId, id));
-      await db.delete(schema.jarvisSkills).where(eq(schema.jarvisSkills.sessionId, id));
-      await db.delete(schema.jarvisMemoryFacts).where(eq(schema.jarvisMemoryFacts.sessionId, id));
-      await db.delete(schema.jarvisMemorySessions).where(eq(schema.jarvisMemorySessions.sessionId, id));
-      await db.delete(schema.jarvisSessions).where(eq(schema.jarvisSessions.id, id));
-      
+      await supabase.from('jarvis_messages').delete().eq('session_id', id);
+      await supabase.from('jarvis_skills').delete().eq('session_id', id);
+      await supabase.from('jarvis_memory_facts').delete().eq('session_id', id);
+      await supabase.from('jarvis_memory_sessions').delete().eq('session_id', id);
+      await supabase.from('jarvis_sessions').delete().eq('id', id);
       res.json({ success: true });
     } catch (e) {
       console.error(e);
@@ -324,12 +213,13 @@ async function startServer() {
   // ── Mensajes de una sesión ──
   app.get("/api/sessions/:id/messages", requireDb, async (req, res) => {
     try {
-      const msgs = await db
-        .select()
-        .from(schema.jarvisMessages)
-        .where(eq(schema.jarvisMessages.sessionId, req.params.id))
-        .orderBy(schema.jarvisMessages.createdAt);
-      res.json(msgs);
+      const { data, error } = await supabase
+        .from('jarvis_messages')
+        .select('*')
+        .eq('session_id', req.params.id)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      res.json(data);
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Error al obtener mensajes" });
@@ -341,33 +231,35 @@ async function startServer() {
     const { sessionId, message, isAudio } = req.body;
 
     // Buscar sesión
-    const rows = await db
-      .select()
-      .from(schema.jarvisSessions)
-      .where(eq(schema.jarvisSessions.id, sessionId));
-    const session = rows[0];
+    const { data: sessionRows, error: sessionError } = await supabase
+      .from('jarvis_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .limit(1);
+    if (sessionError) return res.status(500).json({ error: sessionError.message });
+    const session = sessionRows?.[0];
     if (!session) return res.status(404).json({ error: "Sesión no encontrada" });
 
     // Historial
-    const history = await db
-      .select()
-      .from(schema.jarvisMessages)
-      .where(eq(schema.jarvisMessages.sessionId, sessionId))
-      .orderBy(schema.jarvisMessages.createdAt);
+    const { data: history } = await supabase
+      .from('jarvis_messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true });
 
     // Guardar mensaje del usuario
-    await db.insert(schema.jarvisMessages).values({
+    await supabase.from('jarvis_messages').insert({
       id: uuid(),
-      sessionId,
+      session_id: sessionId,
       role: 'user',
       content: message,
-      createdAt: Date.now(),
-      isAudio: !!isAudio,
+      created_at: Date.now(),
+      is_audio: !!isAudio,
     });
 
     try {
       // 🧠 Memoria: recuperar contexto de sesiones anteriores
-      const memoryContext = await recallContext(db, message).catch(() => '');
+      const memoryContext = await recallContext(supabase, message).catch(() => '');
 
       // 🧠 Inyectar contexto de memoria en el mensaje (si hay)
       const messageWithMemory = memoryContext
@@ -377,18 +269,18 @@ async function startServer() {
       // ── Fase 1 y 2: Jarvis V4 Pro razona ──
       const responseText = await runJarvisTurn(
         session as any,
-        history.map((m) => ({ role: m.role as any, content: m.content })),
+        (history || []).map((m) => ({ role: m.role as any, content: m.content })),
         messageWithMemory,
         (session as any).skillType || 'otro'
       );
 
       // Guardar respuesta de Jarvis
-      await db.insert(schema.jarvisMessages).values({
+      await supabase.from('jarvis_messages').insert({
         id: uuid(),
-        sessionId,
+        session_id: sessionId,
         role: 'assistant',
         content: responseText || '',
-        createdAt: Date.now(),
+        created_at: Date.now(),
       });
 
       // ── Detectar si es generación de ecosistema de arnés (Fase 3) ──
@@ -399,10 +291,9 @@ async function startServer() {
 
       if (isHarnessGeneration) {
         // Intentar extraer nombre del proyecto del historial reciente
-        let projectName = (session as any).projectName;
+        let projectName = (session as any).project_name;
         if (!projectName || projectName === 'unnamed') {
-          // Buscar en los últimos mensajes del usuario palabras clave
-          const userMessages = history
+          const userMessages = (history || [])
             .filter((m) => m.role === 'user')
             .map((m) => m.content)
             .join(' ');
@@ -410,38 +301,28 @@ async function startServer() {
             /(?:skill|agente)\s+(?:para|de|que)?\s*(?:un|una|el|la)?\s*([a-zA-Záéíóúñ]{3,20}(?:\s+[a-zA-Záéíóúñ]{2,20}){0,2})/i
           );
           projectName = nameMatch ? nameMatch[1].trim() : 'skill-generada';
-          // Guardar el nombre extraído
-          await db
-            .update(schema.jarvisSessions)
-            .set({ projectName })
-            .where(eq(schema.jarvisSessions.id, sessionId));
+          await supabase.from('jarvis_sessions')
+            .update({ project_name: projectName })
+            .eq('id', sessionId);
         }
 
         const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const timestamp = Date.now();
 
         // ── Fase 3: Flash genera el ecosistema completo ──
         console.log('⚡ Generando ecosistema de arnés con Flash...');
         const flashOutput = await generateHarnessPlan(
           session as any,
-          history.map((m) => ({ role: m.role as any, content: m.content }))
+          (history || []).map((m) => ({ role: m.role as any, content: m.content }))
         );
 
         // Parsear los archivos separados por ===FILE_SPLIT===
         const parts = flashOutput.split('===FILE_SPLIT===');
-        
-        // El formato esperado es:
-        // [0] AGENTS.md
-        // [1] skill-orquestador.md
-        // [2] validate.sh
-        // [3] progress-template.json
         
         let agentsMd = (parts[0] || '').trim();
         let orquestadorSkill = (parts[1] || '').trim();
         let validateContent = (parts[2] || '').trim();
         let progressTemplate = (parts[3] || '').trim();
 
-        // Limpiar markdown code fences
         const cleanMarkdown = (text: string) => text.replace(/^```(?:markdown|md|bash|sh|json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
         
         agentsMd = cleanMarkdown(agentsMd);
@@ -449,7 +330,7 @@ async function startServer() {
         validateContent = cleanMarkdown(validateContent);
         progressTemplate = cleanMarkdown(progressTemplate);
 
-        const skillContent = agentsMd; // Usamos AGENTS.md como contenido principal
+        const skillContent = agentsMd;
         const skillFilename = 'AGENTS.md';
         const harnessData = JSON.stringify({
           agentsMd,
@@ -459,7 +340,6 @@ async function startServer() {
           fullOutput: flashOutput
         });
 
-        // Si validateContent está vacío, generar uno básico
         if (!validateContent || validateContent.length < 20) {
           validateContent = generateFallbackValidateSh(slug);
         }
@@ -470,52 +350,38 @@ async function startServer() {
         console.log('🔍 Capa 1: Validación determinística...');
         const layer1Result = validateSkill(skillContent);
         const layer1Passed = layer1Result.valid;
-        if (!layer1Passed) {
-          console.log(`  ❌ Capa 1 falló: ${layer1Result.errors.join('; ')}`);
-        } else {
-          console.log('  ✅ Capa 1 aprobada');
-        }
+        console.log(layer1Passed ? '  ✅ Capa 1 aprobada' : `  ❌ Capa 1 falló: ${layer1Result.errors.join('; ')}`);
 
-        // ── Capa 2: Revisor adversarial (V4 Pro) — SIEMPRE se ejecuta ──
-        let layer2Passed = false;
-        let reviewIssues: string[] = [];
-        let reviewRounds = 0;
-
+        // ── Capa 2: Revisor adversarial (V4 Pro) ──
         console.log('🧠 Capa 2: Revisor adversarial (V4 Pro)...');
         const reviewResult = await adversarialReview(skillContent);
-        reviewRounds = 1;
-        reviewIssues = reviewResult.issues;
-        layer2Passed = reviewResult.approved;
-
-        if (!layer2Passed) {
-          console.log(`  ❌ Capa 2 falló: ${reviewIssues.join('; ')}`);
-        } else {
-          console.log('  ✅ Capa 2 aprobada');
-        }
+        const reviewRounds = 1;
+        const reviewIssues = reviewResult.issues;
+        const layer2Passed = reviewResult.approved;
+        console.log(layer2Passed ? '  ✅ Capa 2 aprobada' : `  ❌ Capa 2 falló: ${reviewIssues.join('; ')}`);
 
         const fullyValidated = layer1Passed && layer2Passed;
 
-        // Guardar skill con ambos archivos y resultados de validación
-        await db.insert(schema.jarvisSkills).values({
+        // Guardar skill
+        await supabase.from('jarvis_skills').insert({
           id: uuid(),
-          sessionId,
-          skillFilename,
-          skillContent,
-          validateFilename,
-          validateContent,
-          harnessData,
-          layer1Passed,
-          layer2Passed,
+          session_id: sessionId,
+          skill_filename: skillFilename,
+          skill_content: skillContent,
+          validate_filename: validateFilename,
+          validate_content: validateContent,
+          harness_data: harnessData,
+          layer1_passed: layer1Passed,
+          layer2_passed: layer2Passed,
           validated: fullyValidated,
-          reviewRounds,
-          createdAt: Date.now(),
+          review_rounds: reviewRounds,
+          created_at: Date.now(),
         });
 
         // Actualizar estado de sesión
-        await db
-          .update(schema.jarvisSessions)
-          .set({ status: fullyValidated ? 'complete' : 'validating' })
-          .where(eq(schema.jarvisSessions.id, sessionId));
+        await supabase.from('jarvis_sessions')
+          .update({ status: fullyValidated ? 'complete' : 'validating' })
+          .eq('id', sessionId);
 
         console.log(
           `📦 Skill: ${skillFilename} + ${validateFilename} | ` +
@@ -523,11 +389,11 @@ async function startServer() {
           `Final: ${fullyValidated ? '✅ VALIDADA' : '❌ RECHAZADA'}`
         );
 
-        // 🧠 Memoria: resumir sesión y guardar para el futuro
+        // 🧠 Memoria: resumir sesión
         summarizeSession(
-          db,
+          supabase,
           sessionId,
-          [...history, { role: 'user', content: message }].map((m) => ({
+          [...(history || []), { role: 'user', content: message }].map((m) => ({
             role: m.role,
             content: m.content,
           }))
@@ -554,16 +420,14 @@ async function startServer() {
         });
       }
 
-      // ── Actualizar fase según contenido de la respuesta ──
+      // ── Actualizar fase según contenido ──
       const newStatus = detectPhase(responseText || '', session.status);
       if (newStatus !== session.status) {
-        await db
-          .update(schema.jarvisSessions)
-          .set({ status: newStatus })
-          .where(eq(schema.jarvisSessions.id, sessionId));
+        await supabase.from('jarvis_sessions')
+          .update({ status: newStatus })
+          .eq('id', sessionId);
       }
 
-      // Respuesta normal (Fase 1 o 2)
       res.json({ response: responseText });
     } catch (error: any) {
       await log.capture('api_error', 'Error en /api/chat', error, { sessionId }).catch(() => {});
@@ -623,15 +487,18 @@ async function startServer() {
   app.get("/api/skills", requireDb, async (req, res) => {
     try {
       const sessionId = req.query.sessionId as string | undefined;
-      let query = db.select().from(schema.jarvisSkills).orderBy(schema.jarvisSkills.createdAt);
+      let query = supabase
+        .from('jarvis_skills')
+        .select('*')
+        .order('created_at', { ascending: false });
       
-      // Ejecutar y luego filtrar si es necesario
-      const allSkills = await query;
-      const filtered = sessionId
-        ? allSkills.filter((s) => s.sessionId === sessionId)
-        : allSkills;
+      if (sessionId) {
+        query = query.eq('session_id', sessionId);
+      }
       
-      res.json(filtered);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data || []);
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Error al obtener skills" });
@@ -641,16 +508,18 @@ async function startServer() {
   // ── Descarga de archivos individuales ──
   app.get("/api/skills/:id/download/:fileType", requireDb, async (req, res) => {
     try {
-      const rows = await db
-        .select()
-        .from(schema.jarvisSkills)
-        .where(eq(schema.jarvisSkills.id, req.params.id));
-      const skill = rows[0];
+      const { data: rows, error } = await supabase
+        .from('jarvis_skills')
+        .select('*')
+        .eq('id', req.params.id)
+        .limit(1);
+      if (error) throw error;
+      const skill = rows?.[0];
       if (!skill) return res.status(404).json({ error: "Skill no encontrada" });
 
       const isSkill = req.params.fileType === 'skill';
-      const filename = isSkill ? skill.skillFilename : skill.validateFilename;
-      const content = isSkill ? skill.skillContent : skill.validateContent;
+      const filename = isSkill ? skill.skill_filename : skill.validate_filename;
+      const content = isSkill ? skill.skill_content : skill.validate_content;
       const contentType = isSkill ? 'text/markdown' : 'text/x-shellscript';
 
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

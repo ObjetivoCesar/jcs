@@ -1,0 +1,49 @@
+Ran terminal command: cd "c:\Users\Cesar\Documents\GRUPO EMPRESARIAL REYES\PROYECTOS\Jarvis_Creador_de_Skills" ; vercel --prod --yes 2>&1
+
+Navigated to https://jarvis-jcs.vercel.app/api/health in [Browser](vscode-browser:/c8d093b6-b995-4fde-8b38-26bb64f5d550?vscodeLinkType=browser)
+
+🎉 **¡FUNCIONA!**
+
+```
+✅ 200 OK — https://jarvis-jcs.vercel.app/api/health
+{"status":"ok","version":"2.1","db":"not_configured","models":{"v4":"deepseek-reasoner","flash":"deepseek-chat"}}
+```
+
+Veamos el frontend:
+
+Navigated to https://jarvis-jcs.vercel.app/ in [Browser](vscode-browser:/c8d093b6-b995-4fde-8b38-26bb64f5d550?vscodeLinkType=browser)
+
+🎉 **¡Frontend VIVO!** `https://jarvis-jcs.vercel.app` — UI completa cargada. El error `a.map is not a function` es solo porque la BD no está configurada (normal).
+
+Ahora guardo el fix:
+
+Ran terminal command: cd "c:\Users\Cesar\Documents\GRUPO EMPRESARIAL REYES\PROYECTOS\Jarvis_Creador_de_Skills" ; git add -A ; git commit -m "fix: mover import de Vite a dinámico para evitar crash en Vercel (Rollup native module)" 2>&1 ; git push origin main 2>&1
+Completed with input: cd "c:\Users\Cesar\Documents\GRUPO EMPRESARIAL REYES\PROYECTOS\Jarvis_Creador_de_Skills" ; git add -A ; git commit -m "fix: mover import de Vite a dinámico para evitar crash en Vercel (Rollup native module)" 2>&1 ; git push origin main 2>&1
+
+---
+
+## ✅ ¡Listo! Deploy exitoso — `https://jarvis-jcs.vercel.app`
+
+### El diagnóstico final de por qué fallaba
+
+| Intento | Error | Causa |
+|---------|-------|-------|
+| ❌ V1-V7 | `FUNCTION_INVOCATION_FAILED` | `import { createServer as createViteServer } from "vite"` al inicio de server.ts |
+| ✅ V8 | 200 OK | Vite importado solo en `if (NODE_ENV !== "production")` con `await import("vite")` |
+
+**Vite → Rollup → `@rollup/rollup-linux-x64-gnu`** — dependencia nativa faltante en el entorno serverless de Vercel (Linux). Como Vite es innecesario en producción, la solución fue hacerlo dinámico solo en dev.
+
+### Estado actual
+
+| Endpoint | Estado |
+|----------|--------|
+| `https://jarvis-jcs.vercel.app` | ✅ Frontend cargado |
+| `https://jarvis-jcs.vercel.app/api/health` | ✅ 200 OK |
+| BD | ⚠️ `not_configured` — falta `SUPABASE_DATABASE_URL` |
+
+### Lo que falta para funcionalidad completa
+
+Una sola variable en Vercel:
+> `SUPABASE_DATABASE_URL` = `postgresql://postgres:[TU_PASSWORD]@db.ilhgwqgouwomehgxivbo.supabase.co:5432/postgres`
+
+La encuentras en: **Supabase Dashboard → Project Settings → Database → Connection String**.

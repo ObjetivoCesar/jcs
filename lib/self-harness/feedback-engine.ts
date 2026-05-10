@@ -7,12 +7,10 @@
  * Las reglas se cargan al inicio de cada sesión como restricciones inmutables.
  */
 
-import { eq, desc, count, gte, and } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../db/supabase-schema.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-type DB = NodePgDatabase<typeof schema>;
+type DB = SupabaseClient;
 
 const THRESHOLD_RECURRENCE = 3; // veces para considerar "recurrente"
 const LOOKBACK_HOURS = 24;      // ventana de tiempo
@@ -28,32 +26,24 @@ export function feedbackEngine(db: DB) {
 
     try {
       // Contar ocurrencias del mismo error_type en las últimas N horas
-      const [result] = await db
-        .select({ count: count() })
-        .from(schema.jarvisErrorLog)
-        .where(
-          and(
-            eq(schema.jarvisErrorLog.errorType, errorType),
-            gte(schema.jarvisErrorLog.createdAt, cutoff)
-          )
-        );
+      const { count: occCount, error: countError } = await db
+        .from('jarvis_error_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('error_type', errorType)
+        .gte('created_at', cutoff);
 
-      const occurrences = result?.count ?? 0;
+      const occurrences = countError ? 0 : (occCount ?? 0);
 
       if (occurrences >= THRESHOLD_RECURRENCE) {
         // Verificar si ya existe una regla para este error_type
-        const existingRules = await db
-          .select()
-          .from(schema.jarvisFeedbackRules)
-          .where(
-            and(
-              eq(schema.jarvisFeedbackRules.sourceErrorType, errorType),
-              eq(schema.jarvisFeedbackRules.active, true)
-            )
-          )
+        const { data: existingRules } = await db
+          .from('jarvis_feedback_rules')
+          .select('*')
+          .eq('source_error_type', errorType)
+          .eq('active', true)
           .limit(1);
 
-        if (existingRules.length === 0) {
+        if (!existingRules || existingRules.length === 0) {
           // Generar regla automática
           const ruleId = crypto.randomUUID();
           const lessonId = crypto.randomUUID();
@@ -61,27 +51,27 @@ export function feedbackEngine(db: DB) {
           const ruleDescription = generateRuleDescription(errorType);
           const lessonDescription = generateLessonDescription(errorType);
 
-          await db.insert(schema.jarvisFeedbackRules).values({
+          await db.from('jarvis_feedback_rules').insert({
             id: ruleId,
-            ruleType: deriveRuleType(errorType),
+            rule_type: deriveRuleType(errorType),
             description: ruleDescription,
             condition: `error_type == "${errorType}" AND occurrences >= ${THRESHOLD_RECURRENCE}`,
             action: deriveAction(errorType),
-            sourceErrorType: errorType,
-            occurrenceCount: occurrences,
+            source_error_type: errorType,
+            occurrence_count: occurrences,
             active: true,
-            createdAt: Date.now(),
+            created_at: Date.now(),
           });
 
           // También crear lección aprendida automática
-          await db.insert(schema.jarvisLessons).values({
+          await db.from('jarvis_lessons').insert({
             id: lessonId,
             tag: 'otro',
-            errorType,
+            error_type: errorType,
             description: lessonDescription,
-            fixApplied: deriveFix(errorType),
+            fix_applied: deriveFix(errorType),
             automated: true,
-            createdAt: Date.now(),
+            created_at: Date.now(),
           });
 
           rulesCreated.push(ruleId);
@@ -89,12 +79,12 @@ export function feedbackEngine(db: DB) {
         } else {
           // Actualizar contador de ocurrencias
           await db
-            .update(schema.jarvisFeedbackRules)
-            .set({
-              occurrenceCount: occurrences,
-              lastTriggeredAt: Date.now(),
+            .from('jarvis_feedback_rules')
+            .update({
+              occurrence_count: occurrences,
+              last_triggered_at: Date.now(),
             })
-            .where(eq(schema.jarvisFeedbackRules.id, existingRules[0].id));
+            .eq('id', existingRules[0].id);
         }
       }
     } catch (e) {
@@ -109,19 +99,19 @@ export function feedbackEngine(db: DB) {
    */
   async function loadActiveRules(): Promise<string> {
     try {
-      const rules = await db
-        .select()
-        .from(schema.jarvisFeedbackRules)
-        .where(eq(schema.jarvisFeedbackRules.active, true))
-        .orderBy(desc(schema.jarvisFeedbackRules.occurrenceCount))
+      const { data: rules } = await db
+        .from('jarvis_feedback_rules')
+        .select('*')
+        .eq('active', true)
+        .order('occurrence_count', { ascending: false })
         .limit(20);
 
-      if (rules.length === 0) return '';
+      if (!rules || rules.length === 0) return '';
 
       return (
         'REGLAS DE FEEDBACK AUTOMÁTICO (cargadas al inicio de sesión):\n' +
-        rules.map((r, i) =>
-          `${i + 1}. [${r.ruleType}] ${r.description} (${r.occurrenceCount} ocurrencias)`
+        rules.map((r: any, i: number) =>
+          `${i + 1}. [${r.rule_type}] ${r.description} (${r.occurrence_count} ocurrencias)`
         ).join('\n')
       );
     } catch {

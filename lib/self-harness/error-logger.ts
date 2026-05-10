@@ -11,11 +11,10 @@
  *   await log.critical('db_error', 'Base de datos caída', err);
  */
 
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../db/supabase-schema.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-type DB = NodePgDatabase<typeof schema>;
+type DB = SupabaseClient;
 
 export interface ErrorLogEntry {
   errorType: 'api_error' | 'validation_failure' | 'db_error' | 'deployment' | 'system';
@@ -33,17 +32,17 @@ export function errorLogger(db: DB) {
   ): Promise<string> {
     const id = crypto.randomUUID();
     try {
-      await db.insert(schema.jarvisErrorLog).values({
+      await db.from('jarvis_error_log').insert({
         id,
-        sessionId: entry.sessionId || null,
-        errorType: entry.errorType,
-        errorCode: entry.errorCode || null,
-        message: entry.message.substring(0, 1000), // límite de seguridad
-        stackTrace: entry.stackTrace ? entry.stackTrace.substring(0, 3000) : null,
+        session_id: entry.sessionId || null,
+        error_type: entry.errorType,
+        error_code: entry.errorCode || null,
+        message: entry.message.substring(0, 1000),
+        stack_trace: entry.stackTrace ? entry.stackTrace.substring(0, 3000) : null,
         metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
         severity,
         resolved: false,
-        createdAt: Date.now(),
+        created_at: Date.now(),
       });
 
       // Si es crítico, también imprimir en consola con alerta
