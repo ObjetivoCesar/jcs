@@ -26,4 +26,8 @@
 <!-- tag:otro -->
 - Error: Condiciones de salida ambiguas ("cuando termine" no es verificable).
   Fix: Requerir evento o estado específico que dispare la terminación.
+- Error: El propio JCS no tenía sensores ni feedback loop (irónico).
+  Fix: Se aplicó el self-harness — validate-jcs.sh + error-logger.ts + feedback-engine.ts — para que JCS practique lo que predica.
+- Error: SQLite no funciona en Vercel (filesystem efímero).
+  Fix: Migrar a Supabase PostgreSQL con prefijo jarvis_ en tablas.
 <!-- /tag:otro -->

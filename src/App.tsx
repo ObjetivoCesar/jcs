@@ -231,13 +231,26 @@ export default function App() {
   };
 
   const startNewSession = async () => {
-    const res = await fetch('/api/sessions', { method: 'POST' });
-    const { id } = await res.json();
-    fetchSessions();
-    setCurrentSession({ id, status: 'interviewing' });
-    setMessages([]);
-    setSkills([]);
-    setError(null);
+    try {
+      const res = await fetch('/api/sessions', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('La respuesta del servidor no es JSON. ¿Está el backend corriendo?');
+      }
+      const { id } = data;
+      fetchSessions();
+      setCurrentSession({ id, status: 'interviewing' });
+      setMessages([]);
+      setSkills([]);
+      setError(null);
+    } catch (err: any) {
+      console.error('Error starting new session:', err);
+      setError('No se pudo crear el proyecto: ' + err.message);
+    }
   };
 
   const sendMessage = async () => {

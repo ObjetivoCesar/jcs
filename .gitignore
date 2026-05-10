@@ -10,3 +10,5 @@ local.db
 *.db-journal
 *.db-wal
 .gemini/
+
+.vercel

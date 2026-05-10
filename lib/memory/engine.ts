@@ -6,16 +6,16 @@
  * 2. onMessage()       → detectar entidades y decisiones en cada mensaje
  * 3. onSessionEnd()    → resumir, guardar hechos, linkear entidades
  * 
- * Adaptado de Gbrain (github.com/garrytan/gbrain) para DeepSeek + SQLite.
+ * Adaptado de Gbrain (github.com/garrytan/gbrain) para DeepSeek + Supabase.
  */
 
-import { eq, desc, sql, or, like } from 'drizzle-orm';
-import type { LibSQLDatabase } from 'drizzle-orm/libsql';
-import * as schema from '../db/schema.ts';
+import { eq, desc, like } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import * as schema from '../db/supabase-schema.ts';
 import { detectEntities, detectDecisions } from './detector.ts';
 import crypto from 'crypto';
 
-type DB = LibSQLDatabase<typeof schema>;
+type DB = NodePgDatabase<typeof schema>;
 
 // ── API Pública ──
 
@@ -35,8 +35,8 @@ export async function recallContext(
   const entityNames = entities.map((e) => e.name.toLowerCase());
   const relevantFacts = await db
     .select()
-    .from(schema.memoryFacts)
-    .orderBy(desc(schema.memoryFacts.importance), desc(schema.memoryFacts.lastAccessed))
+    .from(schema.jarvisMemoryFacts)
+    .orderBy(desc(schema.jarvisMemoryFacts.importance), desc(schema.jarvisMemoryFacts.lastAccessed))
     .limit(8);
 
   // Filtrar hechos que mencionan alguna de las entidades detectadas
@@ -48,12 +48,12 @@ export async function recallContext(
   // Marcar como accedidos
   for (const fact of filtered) {
     await db
-      .update(schema.memoryFacts)
+      .update(schema.jarvisMemoryFacts)
       .set({
         lastAccessed: Date.now(),
         accessCount: (fact.accessCount || 0) + 1,
       })
-      .where(eq(schema.memoryFacts.id, fact.id));
+      .where(eq(schema.jarvisMemoryFacts.id, fact.id));
   }
 
   if (filtered.length === 0) return '';
@@ -80,20 +80,20 @@ export async function processEntities(
     // Upsert: insertar o actualizar
     const existing = await db
       .select()
-      .from(schema.memoryEntities)
-      .where(eq(schema.memoryEntities.name, entity.name))
+      .from(schema.jarvisMemoryEntities)
+      .where(eq(schema.jarvisMemoryEntities.name, entity.name))
       .limit(1);
 
     if (existing.length > 0) {
       await db
-        .update(schema.memoryEntities)
+        .update(schema.jarvisMemoryEntities)
         .set({
           lastSeenAt: Date.now(),
           occurrenceCount: (existing[0].occurrenceCount || 1) + 1,
         })
-        .where(eq(schema.memoryEntities.id, existing[0].id));
+        .where(eq(schema.jarvisMemoryEntities.id, existing[0].id));
     } else {
-      await db.insert(schema.memoryEntities).values({
+      await db.insert(schema.jarvisMemoryEntities).values({
         id: crypto.randomUUID(),
         name: entity.name,
         type: entity.type,
@@ -106,7 +106,7 @@ export async function processEntities(
 
   // Guardar decisiones como hechos
   for (const decision of decisions) {
-    await db.insert(schema.memoryFacts).values({
+    await db.insert(schema.jarvisMemoryFacts).values({
       id: crypto.randomUUID(),
       factType: 'decision',
       content: decision,
@@ -145,7 +145,7 @@ export async function summarizeSession(
   const summary = summaryLines.join(' ');
 
   // Guardar resumen de sesión
-  await db.insert(schema.memorySessions).values({
+  await db.insert(schema.jarvisMemorySessions).values({
     id: crypto.randomUUID(),
     sessionId,
     summary,
@@ -157,7 +157,7 @@ export async function summarizeSession(
 
   // Guardar preferencias/decisiones como hechos de alta importancia
   for (const decision of decisions) {
-    await db.insert(schema.memoryFacts).values({
+    await db.insert(schema.jarvisMemoryFacts).values({
       id: crypto.randomUUID(),
       sessionId,
       factType: 'decision',
@@ -169,7 +169,7 @@ export async function summarizeSession(
 
   // Guardar entidades detectadas como hechos de tipo 'pattern'
   for (const entity of entities.slice(0, 5)) {
-    await db.insert(schema.memoryFacts).values({
+    await db.insert(schema.jarvisMemoryFacts).values({
       id: crypto.randomUUID(),
       sessionId,
       factType: 'pattern',
@@ -193,19 +193,19 @@ export async function summarizeSession(
 export async function searchMemory(
   db: DB,
   query: string
-): Promise<{ facts: typeof schema.memoryFacts.$inferSelect[]; entities: typeof schema.memoryEntities.$inferSelect[] }> {
+): Promise<{ facts: typeof schema.jarvisMemoryFacts.$inferSelect[]; entities: typeof schema.jarvisMemoryEntities.$inferSelect[] }> {
   const facts = await db
     .select()
-    .from(schema.memoryFacts)
-    .where(like(schema.memoryFacts.content, `%${query}%`))
-    .orderBy(desc(schema.memoryFacts.importance))
+    .from(schema.jarvisMemoryFacts)
+    .where(like(schema.jarvisMemoryFacts.content, `%${query}%`))
+    .orderBy(desc(schema.jarvisMemoryFacts.importance))
     .limit(10);
 
   const entities = await db
     .select()
-    .from(schema.memoryEntities)
-    .where(like(schema.memoryEntities.name, `%${query}%`))
-    .orderBy(desc(schema.memoryEntities.occurrenceCount))
+    .from(schema.jarvisMemoryEntities)
+    .where(like(schema.jarvisMemoryEntities.name, `%${query}%`))
+    .orderBy(desc(schema.jarvisMemoryEntities.occurrenceCount))
     .limit(5);
 
   return { facts, entities };
