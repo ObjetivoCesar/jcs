@@ -12,7 +12,6 @@ import { recallContext, processEntities, summarizeSession } from "./lib/memory/e
 import { errorLogger } from "./lib/self-harness/error-logger.js";
 import { feedbackEngine } from "./lib/self-harness/feedback-engine.js";
 import crypto from "crypto";
-import "dotenv/config";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +22,9 @@ function uuid() {
 
 async function startServer() {
   console.log("🚀 Iniciando Jarvis JCS v2.0...");
+
+  // dotenv es opcional — en Vercel solo se usan las env vars del dashboard
+  try { await import("dotenv/config"); } catch {}
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
